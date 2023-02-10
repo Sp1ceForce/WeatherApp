@@ -4,60 +4,60 @@ using System.Text;
 using WeatherApp;
 Console.OutputEncoding = Encoding.UTF8;
 var API_Key = "4a64a53c024f793c57e4b57095e85459";
+var tgKey = "6068662939:AAHVlRxsYTA5XH46ndifEGWjFuWQr9UkFfk";
 var client = new HttpClient();
-
-
-Console.WriteLine("Введите город:");
-string cityName = Console.ReadLine();
-var response = await client.GetAsync($"https://api.openweathermap.org/data/2.5/weather?q={HttpUtility.UrlEncode(cityName)}&appid={API_Key}&units=metric&lang=ru");
-Result weatherResult;
-if (response.IsSuccessStatusCode)
+int offset = 0;
+Console.WriteLine("Начало работы");
+while (true)
 {
-    string res = await response.Content.ReadAsStringAsync();
-    weatherResult = JsonConvert.DeserializeObject<Result>(res);
-    Console.WriteLine("Результат вашего запроса: \n");
-    Console.WriteLine($"На улице города {weatherResult.CityName} сейчас {weatherResult.Weather[0].WeatherDescription}");
-    Console.WriteLine($"Температура равна {weatherResult.Main.Temperature} но ощущается как {weatherResult.Main.FeelsLike}");
-    Console.WriteLine(@$"Скорость ветра: {weatherResult.WindInfo.WindSpeed} м\с. Направление {GetWindDirection(weatherResult.WindInfo.WindDirectionDeg)}");
-    Console.WriteLine($"Давление {weatherResult.Main.Pressure} мм. ртутного столба\n");
-}
-else
-{
-    Console.WriteLine("Ошибка, вы указали неправильный город");
-    Console.WriteLine("Нажмите на любую клавишу чтобы выключить приложение");
-    Console.ReadKey();
-    return;
-}
-//Отправка запроса и получение прогноза погоды на 4 дня
-var response4Day = await client.GetAsync($"https://api.openweathermap.org/data/2.5/forecast?q={cityName}&appid={API_Key}&units=metric&lang=ru");
-//Количество записей в list которые нужно пропустить чтобы перейти на следующий день
-const int nextDayIterator = 8;
-int dayIterator = nextDayIterator;
-//Нужно для вывода дня недели на русском языке
-var culture = new System.Globalization.CultureInfo("ru-ru");
-Console.WriteLine("-------------------------------------------------");
-Console.WriteLine("Прогноз на 4 дня: \n");
-if (response4Day.IsSuccessStatusCode)
-{
-    //Конвертация ответа от сервиса в класс
-    string jsonStr = await response4Day.Content.ReadAsStringAsync();
-    var daysReports = JsonConvert.DeserializeObject<DaysReports>(jsonStr);
+    var tgInput = await client.GetAsync($"https://api.telegram.org/bot{tgKey}/getUpdates?offset={offset}&allowed_updates=[\"message\"]");
     
-    for (int i = 0; i < 4; i++) 
+    if (tgInput.IsSuccessStatusCode)
     {
-        var currDay = daysReports.list[dayIterator];
-        DateTime date = DateTime.Parse(currDay.DtTxt);
-        Console.WriteLine("-------------------------------------------------");
-        Console.WriteLine($"{date.ToString("F")} - {culture.DateTimeFormat.GetDayName(date.DayOfWeek)}");
-        Console.WriteLine($"Мин. температура: {currDay.Main.MinTemperature} Макс. температура: {currDay.Main.MaxTemperature}");
-        Console.WriteLine($"Ожидаемое состояние погоды: {currDay.Weather[0].WeatherDescription}");
-        dayIterator += nextDayIterator;
+        string res = await tgInput.Content.ReadAsStringAsync();
+        var updates = JsonConvert.DeserializeObject<TGInput>(res);
+        foreach (var update in updates.Results)
+        {
+            int chatId = update.NewMessage.Chat.ChatId;
+            string inputMessage = update.NewMessage.Text;
+            string resText = string.Empty;
+            if (inputMessage == "/commands" || inputMessage == "/start")
+            {
+                resText = "Доступны следующие команды:\n/getweatherinfo [Название города] - получение информации о погоде в выбранном городе";
+            }
+            else if (inputMessage.Contains("/getweatherinfo"))
+            {
+                string cityName = inputMessage.Replace("/getweatherinfo ", "");
+                var response = await client.GetAsync($"https://api.openweathermap.org/data/2.5/weather?q={HttpUtility.UrlEncode(cityName)}&appid={API_Key}&units=metric&lang=ru");
+                Result weatherResult;
+                if (response.IsSuccessStatusCode)
+                {
+                    string weatherText = await response.Content.ReadAsStringAsync();
+                    Console.WriteLine(cityName);
+                    weatherResult = JsonConvert.DeserializeObject<Result>(weatherText);
+                    resText = "Результат вашего запроса: \n";
+                    resText += $"На улице города {weatherResult.CityName} сейчас {weatherResult.Weather[0].WeatherDescription}\n";
+                    resText += $"Температура равна {weatherResult.Main.Temperature} но ощущается как {weatherResult.Main.FeelsLike}\n";
+                    resText += @$"Скорость ветра: {weatherResult.WindInfo.WindSpeed} м\с. Направление {GetWindDirection(weatherResult.WindInfo.WindDirectionDeg)}" + "\n";
+                    resText += $"Давление {weatherResult.Main.Pressure} мм. ртутного столба\n";
+                }
+                else
+                {
+                    resText = "Ошибка, вы указали неправильный город";
+                }
+            }
+            else
+            {
+                resText = "Такая команда не существует, введите /commands чтобы увидеть список команд";
+            }
+            await client.GetAsync($"https://api.telegram.org/bot{tgKey}/sendMessage?chat_id={chatId}&text={resText}");
+        }
+        if (updates.Results.Length > 0)
+        {
+            offset = updates.Results[updates.Results.Length - 1].UpdateID+1;
+        }
     }
 }
-
-
-Console.ReadKey();
-
 //Превращение градусов направления ветра в нормальные буквы
 string GetWindDirection(int degrees) =>
  degrees switch
